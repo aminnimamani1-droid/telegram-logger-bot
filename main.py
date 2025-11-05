@@ -1,5 +1,4 @@
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters
 from datetime import datetime, timedelta
 import os
 import json
@@ -32,13 +31,12 @@ for user_id in list(user_logs.keys()):
         user_logs[user_id] = {get_iran_date(): user_logs[user_id]}
 save_logs(user_logs)
 
-# Handlers
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
+def start(update, context):
+    update.message.reply_text(
         "سلام! پیام هاتو بفرست تا ثبت کنم.\nبرای دیدن پیام‌های امروز /show رو بزن."
     )
 
-async def log_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def log_message(update, context):
     user_id = str(update.message.from_user.id)
     text = update.message.text
     date_str = get_iran_date()
@@ -51,32 +49,28 @@ async def log_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user_logs[user_id][date_str].append(f"ساعت {time_str} : {text}")
     save_logs(user_logs)
+    update.message.reply_text(f"📅 {date_str}\nساعت {time_str} : {text}")
 
-    await update.message.reply_text(f"📅 {date_str}\nساعت {time_str} : {text}")
-
-async def show_logs(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def show_logs(update, context):
     user_id = str(update.message.from_user.id)
     today = get_iran_date()
-
     if user_id in user_logs and today in user_logs[user_id]:
         messages = user_logs[user_id][today]
         msg = "📅 پیام‌های امروز:\n" + "\n".join(messages)
-        MAX_CHARS = 4000
-        for i in range(0, len(msg), MAX_CHARS):
-            await update.message.reply_text(msg[i:i+MAX_CHARS])
+        update.message.reply_text(msg)
     else:
-        await update.message.reply_text(f"هیچ پیامی برای امروز ثبت نشده است.")
+        update.message.reply_text(f"هیچ پیامی برای امروز ثبت نشده است.")
 
-# =================== اجرای Bot ===================
-if __name__ == "__main__":
-    if not TOKEN:
-        print("❌ توکن پیدا نشد.")
-        exit(1)
+if not TOKEN:
+    print("❌ توکن پیدا نشد.")
+    exit(1)
 
-    app = ApplicationBuilder().token(TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("show", show_logs))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, log_message))
+updater = Updater(TOKEN, use_context=True)
+dp = updater.dispatcher
+dp.add_handler(CommandHandler("start", start))
+dp.add_handler(CommandHandler("show", show_logs))
+dp.add_handler(MessageHandler(Filters.text & ~Filters.command, log_message))
 
-    print("✅ Bot running ...")
-    app.run_polling()
+print("✅ Bot running ...")
+updater.start_polling()
+updater.idle()
