@@ -5,21 +5,21 @@ import os
 import json
 from flask import Flask
 from threading import Thread
+import asyncio
 
-# TOKEN را از Secret محیطی می‌خوانیم
+# خواندن توکن از متغیر محیطی
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 
 LOG_FILE = "logs.json"
 
-# تابع برای گرفتن زمان ایران (UTC+3:30)
+# زمان ایران
 def get_iran_time():
     return datetime.utcnow() + timedelta(hours=3, minutes=30)
 
-# تابع برای گرفتن تاریخ امروز به وقت ایران
 def get_iran_date():
     return get_iran_time().strftime("%Y-%m-%d")
 
-# بارگذاری اولیه لاگ‌ها از فایل (اگر وجود داشته باشد)
+# بارگذاری و ذخیره لاگ‌ها
 def load_logs():
     try:
         if os.path.exists(LOG_FILE):
@@ -38,16 +38,13 @@ def save_logs(data):
 
 user_logs = load_logs()
 
-# تبدیل ساختار قدیمی (list) به ساختار جدید (dict با تاریخ)
 def migrate_old_data():
     global user_logs
     migrated = False
     for user_id in list(user_logs.keys()):
-        # اگر داده قدیمی (list) باشد، تبدیل کن
         if isinstance(user_logs[user_id], list):
             old_messages = user_logs[user_id]
             user_logs[user_id] = {}
-            # همه پیام‌های قدیمی رو به تاریخ امروز منتقل کن
             today = get_iran_date()
             user_logs[user_id][today] = old_messages
             migrated = True
@@ -55,36 +52,30 @@ def migrate_old_data():
         save_logs(user_logs)
         print("داده‌های قدیمی به فرمت جدید تبدیل شدند.")
 
-# اجرای migration
 migrate_old_data()
 
-# دستور /start
+# دستورات
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(  # type: ignore
+    await update.message.reply_text(
         "سلام! پیام هاتو بفرست تا با زمان (وقت ایران) ثبت کنم.\n"
         "برای دیدن پیام‌های امروز /show رو بزن.\n"
         "هر روز بعد از 12 شب، لیست جدیدی شروع میشه!"
     )
 
-# ذخیره پیام‌ها با زمان و تاریخ ایران
 async def log_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.message.from_user  # type: ignore
-    user_id = str(user.id)  # type: ignore
-    text = update.message.text  # type: ignore
+    user = update.message.from_user
+    user_id = str(user.id)
+    text = update.message.text
     
     iran_time = get_iran_time()
-    date_str = iran_time.strftime("%Y-%m-%d")  # تاریخ ایران
-    time_str = iran_time.strftime("%H:%M:%S")  # ساعت ایران
+    date_str = iran_time.strftime("%Y-%m-%d")
+    time_str = iran_time.strftime("%H:%M:%S")
     
-    # ساختار: {user_id: {date: [messages]}}
     if user_id not in user_logs:
         user_logs[user_id] = {}
-    
-    # اگر داده قدیمی (list) باشد، تبدیل کن و داده‌های قدیمی رو حفظ کن
     if isinstance(user_logs[user_id], list):
         old_messages = user_logs[user_id]
         user_logs[user_id] = {date_str: old_messages}
-    
     if date_str not in user_logs[user_id]:
         user_logs[user_id][date_str] = []
     
@@ -92,16 +83,13 @@ async def log_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_logs[user_id][date_str].append(entry)
     save_logs(user_logs)
     
-    # نمایش پیام با تاریخ شمسی (میلادی)
-    await update.message.reply_text(f"📅 {date_str}\n{entry}")  # type: ignore
+    await update.message.reply_text(f"📅 {date_str}\n{entry}")
 
-# نمایش پیام‌های امروز فقط
 async def show_logs(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.message.from_user  # type: ignore
-    user_id = str(user.id)  # type: ignore
-    today = get_iran_date()  # تاریخ امروز به وقت ایران
+    user = update.message.from_user
+    user_id = str(user.id)
+    today = get_iran_date()
     
-    # اگر کاربر داده دارد، چک کن که داده قدیمی (list) نباشد
     if user_id in user_logs:
         if isinstance(user_logs[user_id], list):
             old_messages = user_logs[user_id]
@@ -113,14 +101,13 @@ async def show_logs(update: Update, context: ContextTypes.DEFAULT_TYPE):
         header = f"📅 پیام‌های امروز ({today}):\n" + "="*30 + "\n\n"
         message = header + "\n".join(messages)
         
-        # اگر پیام خیلی طولانی بود، در چند پیام بفرست
         MAX_CHARS = 4000
         for i in range(0, len(message), MAX_CHARS):
-            await update.message.reply_text(message[i:i+MAX_CHARS])  # type: ignore
+            await update.message.reply_text(message[i:i+MAX_CHARS])
     else:
-        await update.message.reply_text(f"هیچ پیامی برای امروز ({today}) ثبت نشده است.")  # type: ignore
+        await update.message.reply_text(f"هیچ پیامی برای امروز ({today}) ثبت نشده است.")
 
-# =================== Keep Alive با Flask ===================
+# Flask برای نگه‌داری ربات
 flask_app = Flask('')
 
 @flask_app.route('/')
@@ -135,18 +122,21 @@ def keep_alive():
     t.daemon = True
     t.start()
 
-# =================== اجرای Bot ===================
-if __name__ == "__main__":
+# اجرای async Bot
+async def main():
     if not TOKEN:
-        print("خطا: توکن تلگرام یافت نشد. لطفا Secret با کلید TELEGRAM_BOT_TOKEN را تنظیم کنید.")
-        exit(1)
+        print("❌ خطا: توکن تنظیم نشده. در Render مقدار Secret را با کلید TELEGRAM_BOT_TOKEN وارد کن.")
+        return
 
-    keep_alive()  # سرور نگه‌دارنده را روشن کن
+    keep_alive()
+    app = ApplicationBuilder().token(TOKEN).build()
 
-    bot_app = ApplicationBuilder().token(TOKEN).build()
-    bot_app.add_handler(CommandHandler("start", start))
-    bot_app.add_handler(CommandHandler("show", show_logs))
-    bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, log_message))
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("show", show_logs))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, log_message))
 
-    print("Bot running...")
-    bot_app.run_polling()
+    print("✅ Bot running ...")
+    await app.run_polling()
+
+if __name__ == "__main__":
+    asyncio.run(main())
