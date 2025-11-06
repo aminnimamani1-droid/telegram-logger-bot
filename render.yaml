@@ -1,4 +1,4 @@
 runtime: python
-pythonVersion: 3.10.12  # حتماً 3.10 باشه
+pythonVersion: 3.10.12
 buildCommand: "pip install -r requirements.txt"
 startCommand: "python main.py"
