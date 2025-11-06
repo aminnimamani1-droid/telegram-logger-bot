@@ -1,18 +1,22 @@
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 from datetime import datetime, timedelta
 import os
 import json
+import asyncio
 
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 
 LOG_FILE = "logs.json"
 
+# گرفتن زمان ایران
 def get_iran_time():
     return datetime.utcnow() + timedelta(hours=3, minutes=30)
 
 def get_iran_date():
     return get_iran_time().strftime("%Y-%m-%d")
 
+# مدیریت لاگ‌ها
 def load_logs():
     if os.path.exists(LOG_FILE):
         with open(LOG_FILE, "r", encoding="utf-8") as f:
@@ -25,18 +29,20 @@ def save_logs(data):
 
 user_logs = load_logs()
 
-# Migration داده‌های قدیمی
+# تبدیل داده‌های قدیمی (در صورت نیاز)
 for user_id in list(user_logs.keys()):
     if isinstance(user_logs[user_id], list):
         user_logs[user_id] = {get_iran_date(): user_logs[user_id]}
 save_logs(user_logs)
 
-def start(update, context):
-    update.message.reply_text(
-        "سلام! پیام هاتو بفرست تا ثبت کنم.\nبرای دیدن پیام‌های امروز /show رو بزن."
+# شروع
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "سلام! پیام‌هاتو بفرست تا ثبت کنم.\nبرای دیدن پیام‌های امروز /show رو بزن."
     )
 
-def log_message(update, context):
+# ثبت پیام‌ها
+async def log_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.message.from_user.id)
     text = update.message.text
     date_str = get_iran_date()
@@ -49,28 +55,33 @@ def log_message(update, context):
 
     user_logs[user_id][date_str].append(f"ساعت {time_str} : {text}")
     save_logs(user_logs)
-    update.message.reply_text(f"📅 {date_str}\nساعت {time_str} : {text}")
+    await update.message.reply_text(f"📅 {date_str}\nساعت {time_str} : {text}")
 
-def show_logs(update, context):
+# نمایش پیام‌ها
+async def show_logs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.message.from_user.id)
     today = get_iran_date()
     if user_id in user_logs and today in user_logs[user_id]:
         messages = user_logs[user_id][today]
         msg = "📅 پیام‌های امروز:\n" + "\n".join(messages)
-        update.message.reply_text(msg)
+        await update.message.reply_text(msg)
     else:
-        update.message.reply_text(f"هیچ پیامی برای امروز ثبت نشده است.")
+        await update.message.reply_text("هیچ پیامی برای امروز ثبت نشده است.")
 
-if not TOKEN:
-    print("❌ توکن پیدا نشد.")
-    exit(1)
+# اجرای اصلی
+async def main():
+    if not TOKEN:
+        print("❌ توکن پیدا نشد.")
+        return
 
-updater = Updater(TOKEN, use_context=True)
-dp = updater.dispatcher
-dp.add_handler(CommandHandler("start", start))
-dp.add_handler(CommandHandler("show", show_logs))
-dp.add_handler(MessageHandler(Filters.text & ~Filters.command, log_message))
+    app = ApplicationBuilder().token(TOKEN).build()
 
-print("✅ Bot running ...")
-updater.start_polling()
-updater.idle()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("show", show_logs))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, log_message))
+
+    print("✅ Bot is running...")
+    await app.run_polling()
+
+if __name__ == "__main__":
+    asyncio.run(main())
