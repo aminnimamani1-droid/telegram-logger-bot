@@ -3,20 +3,24 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, Con
 from datetime import datetime, timedelta
 import os
 import json
+import nest_asyncio
 import asyncio
+
+# رفع مشکل event loop در Render / Python 3.13
+nest_asyncio.apply()
 
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 
 LOG_FILE = "logs.json"
 
-# گرفتن زمان ایران
+# زمان ایران
 def get_iran_time():
     return datetime.utcnow() + timedelta(hours=3, minutes=30)
 
 def get_iran_date():
     return get_iran_time().strftime("%Y-%m-%d")
 
-# مدیریت لاگ‌ها
+# مدیریت فایل لاگ‌ها
 def load_logs():
     if os.path.exists(LOG_FILE):
         with open(LOG_FILE, "r", encoding="utf-8") as f:
@@ -29,19 +33,19 @@ def save_logs(data):
 
 user_logs = load_logs()
 
-# تبدیل داده‌های قدیمی (در صورت نیاز)
+# مایگریشن داده‌های قدیمی
 for user_id in list(user_logs.keys()):
     if isinstance(user_logs[user_id], list):
         user_logs[user_id] = {get_iran_date(): user_logs[user_id]}
 save_logs(user_logs)
 
-# شروع
+# /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "سلام! پیام‌هاتو بفرست تا ثبت کنم.\nبرای دیدن پیام‌های امروز /show رو بزن."
     )
 
-# ثبت پیام‌ها
+# ثبت پیام
 async def log_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.message.from_user.id)
     text = update.message.text
@@ -57,7 +61,7 @@ async def log_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_logs(user_logs)
     await update.message.reply_text(f"📅 {date_str}\nساعت {time_str} : {text}")
 
-# نمایش پیام‌ها
+# /show
 async def show_logs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.message.from_user.id)
     today = get_iran_date()
@@ -75,13 +79,12 @@ async def main():
         return
 
     app = ApplicationBuilder().token(TOKEN).build()
-
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("show", show_logs))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, log_message))
 
-    print("✅ Bot is running...")
+    print("✅ Bot is running ...")
     await app.run_polling()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.get_event_loop().run_until_complete(main())
