@@ -1,4 +1,4 @@
 runtime: python
-pythonVersion: 3.10.12   # حتماً نسخه 3.10 باشه تا با PTB 13.15 سازگار باشه
+pythonVersion: 3.10.12  # حتماً 3.10 باشه
 buildCommand: "pip install -r requirements.txt"
 startCommand: "python main.py"
