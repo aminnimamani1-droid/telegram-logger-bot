@@ -1,26 +1,28 @@
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters
 from datetime import datetime, timedelta
+from flask import Flask
+import threading
 import os
 import json
-import nest_asyncio
-import asyncio
-
-# رفع مشکل event loop در Render / Python 3.13
-nest_asyncio.apply()
 
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-
 LOG_FILE = "logs.json"
 
-# زمان ایران
+app = Flask(__name__)
+
+@app.route("/")
+def home():
+    return "✅ Telegram bot is running!"
+
+def run_flask():
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+
 def get_iran_time():
     return datetime.utcnow() + timedelta(hours=3, minutes=30)
 
 def get_iran_date():
     return get_iran_time().strftime("%Y-%m-%d")
 
-# مدیریت فایل لاگ‌ها
 def load_logs():
     if os.path.exists(LOG_FILE):
         with open(LOG_FILE, "r", encoding="utf-8") as f:
@@ -33,20 +35,17 @@ def save_logs(data):
 
 user_logs = load_logs()
 
-# مایگریشن داده‌های قدیمی
 for user_id in list(user_logs.keys()):
     if isinstance(user_logs[user_id], list):
         user_logs[user_id] = {get_iran_date(): user_logs[user_id]}
 save_logs(user_logs)
 
-# /start
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
+def start(update, context):
+    update.message.reply_text(
         "سلام! پیام‌هاتو بفرست تا ثبت کنم.\nبرای دیدن پیام‌های امروز /show رو بزن."
     )
 
-# ثبت پیام
-async def log_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def log_message(update, context):
     user_id = str(update.message.from_user.id)
     text = update.message.text
     date_str = get_iran_date()
@@ -59,32 +58,33 @@ async def log_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user_logs[user_id][date_str].append(f"ساعت {time_str} : {text}")
     save_logs(user_logs)
-    await update.message.reply_text(f"📅 {date_str}\nساعت {time_str} : {text}")
+    update.message.reply_text(f"📅 {date_str}\nساعت {time_str} : {text}")
 
-# /show
-async def show_logs(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def show_logs(update, context):
     user_id = str(update.message.from_user.id)
     today = get_iran_date()
     if user_id in user_logs and today in user_logs[user_id]:
         messages = user_logs[user_id][today]
         msg = "📅 پیام‌های امروز:\n" + "\n".join(messages)
-        await update.message.reply_text(msg)
+        update.message.reply_text(msg)
     else:
-        await update.message.reply_text("هیچ پیامی برای امروز ثبت نشده است.")
+        update.message.reply_text("هیچ پیامی برای امروز ثبت نشده است.")
 
-# اجرای اصلی
-async def main():
-    if not TOKEN:
-        print("❌ توکن پیدا نشد.")
-        return
+def start_bot():
+    updater = Updater(TOKEN, use_context=True)
+    dp = updater.dispatcher
+    dp.add_handler(CommandHandler("start", start))
+    dp.add_handler(CommandHandler("show", show_logs))
+    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, log_message))
 
-    app = ApplicationBuilder().token(TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("show", show_logs))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, log_message))
-
-    print("✅ Bot is running ...")
-    await app.run_polling()
+    print("✅ Bot running ...")
+    updater.start_polling()
+    updater.idle()
 
 if __name__ == "__main__":
-    asyncio.get_event_loop().run_until_complete(main())
+    if not TOKEN:
+        print("❌ توکن پیدا نشد.")
+        exit(1)
+
+    threading.Thread(target=run_flask).start()
+    start_bot()
