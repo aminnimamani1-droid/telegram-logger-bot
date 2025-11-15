@@ -4,27 +4,26 @@ from datetime import datetime, timedelta
 from flask import Flask
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
-import asyncio
+import threading
 
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 LOG_FILE = "logs.json"
 
-app = Flask(__name__)
-
-@app.route("/")
-def home():
-    return "✅ Telegram bot is running!"
-
+# ==================== TIME ====================
 def get_iran_time():
     return datetime.utcnow() + timedelta(hours=3, minutes=30)
 
 def get_iran_date():
     return get_iran_time().strftime("%Y-%m-%d")
 
+# ==================== LOG FILE ====================
 def load_logs():
     if os.path.exists(LOG_FILE):
-        with open(LOG_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
+        try:
+            with open(LOG_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except:
+            pass
     return {}
 
 def save_logs(data):
@@ -33,16 +32,22 @@ def save_logs(data):
 
 user_logs = load_logs()
 
-for user_id in list(user_logs.keys()):
-    if isinstance(user_logs[user_id], list):
-        user_logs[user_id] = {get_iran_date(): user_logs[user_id]}
-save_logs(user_logs)
+# ==================== TELEGRAM BOT ====================
 
-# --- Handlers ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "سلام! پیام‌هاتو بفرست تا ثبت کنم.\nبرای دیدن پیام‌های امروز /show رو بزن."
+    msg = (
+        "👋 **سلام!**\n\n"
+        "من پیام‌هات را با تاریخ و ساعت ذخیره می‌کنم.\n\n"
+        "📌 فرمان‌ها:\n"
+        "• /show پیام‌های امروز\n"
+        "• /today خلاصه امروز\n"
+        "• /showall همه روزها\n"
+        "• فقط پیام بده تا ذخیره کنم\n"
     )
+    await update.message.reply_markdown(msg)
+
+async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_markdown("📘 راهنما: پیام بده تا ذخیره کنم. فرمان‌ها را هم بلدم.")
 
 async def log_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.message.from_user.id)
@@ -55,38 +60,79 @@ async def log_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if date_str not in user_logs[user_id]:
         user_logs[user_id][date_str] = []
 
-    user_logs[user_id][date_str].append(f"ساعت {time_str} : {text}")
+    entry = f"ساعت {time_str} : {text}"
+    user_logs[user_id][date_str].append(entry)
     save_logs(user_logs)
-    await update.message.reply_text(f"📅 {date_str}\nساعت {time_str} : {text}")
+
+    await update.message.reply_markdown(f"📝 **ثبت شد:**\n`{entry}`")
 
 async def show_logs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.message.from_user.id)
     today = get_iran_date()
-    if user_id in user_logs and today in user_logs[user_id]:
-        messages = user_logs[user_id][today]
-        msg = "📅 پیام‌های امروز:\n" + "\n".join(messages)
-        await update.message.reply_text(msg)
-    else:
-        await update.message.reply_text("هیچ پیامی برای امروز ثبت نشده است.")
 
-# --- Bot Starter ---
+    if user_id not in user_logs or today not in user_logs[user_id]:
+        return await update.message.reply_text("📭 امروز هیچ پیامی نداری.")
+
+    msgs = "\n".join(user_logs[user_id][today])
+    await update.message.reply_markdown("📅 **پیام‌های امروز:**\n\n" + msgs)
+
+async def today_summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = str(update.message.from_user.id)
+    today = get_iran_date()
+
+    if user_id not in user_logs or today not in user_logs[user_id]:
+        return await update.message.reply_text("📭 هیچ پیام امروز ثبت نشده.")
+
+    msgs = user_logs[user_id][today]
+    summary = (
+        "📊 **خلاصه امروز:**\n\n"
+        f"📌 تعداد پیام‌ها: {len(msgs)}\n"
+        f"⏰ اولین پیام: {msgs[0].split()[1]}\n"
+        f"⏰ آخرین پیام: {msgs[-1].split()[1]}"
+    )
+    await update.message.reply_markdown(summary)
+
+async def show_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = str(update.message.from_user.id)
+    if user_id not in user_logs:
+        return await update.message.reply_text("هیچ داده‌ای وجود ندارد.")
+
+    dates = list(user_logs[user_id].keys())
+    await update.message.reply_markdown("📅 روزهای ذخیره شده:\n\n" + "\n".join("• " + d for d in dates))
+
+# ==================== START BOT ====================
+
 def start_bot():
-    app_bot = ApplicationBuilder().token(TOKEN).build()
-    app_bot.add_handler(CommandHandler("start", start))
-    app_bot.add_handler(CommandHandler("show", show_logs))
-    app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, log_message))
-    
-    print("✅ Bot running ...")
-    app_bot.run_polling()
+    bot = ApplicationBuilder().token(TOKEN).build()
 
-# --- Flask in Thread ---
-import threading
+    bot.add_handler(CommandHandler("start", start))
+    bot.add_handler(CommandHandler("help", help_cmd))
+    bot.add_handler(CommandHandler("show", show_logs))
+    bot.add_handler(CommandHandler("today", today_summary))
+    bot.add_handler(CommandHandler("showall", show_all))
+    bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, log_message))
+
+    print("🚀 Bot running...")
+    bot.run_polling()
+
+# ==================== FLASK KEEP ALIVE ====================
+
+flask_app = Flask(__name__)
+
+@flask_app.route("/")
+def home():
+    return "🌙 Bot is alive."
+
 def run_flask():
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+    port = int(os.environ.get("PORT", 10000))
+    flask_app.run(host="0.0.0.0", port=port)
+
+# ==================== COMBINED START ====================
 
 if __name__ == "__main__":
     if not TOKEN:
-        print("❌ توکن پیدا نشد.")
+        print("❌ توکن در محیط تنظیم نشده.")
         exit(1)
-    threading.Thread(target=run_flask).start()
-    start_bot()
+
+    threading.Thread(target=start_bot).start()
+    run_flask()
